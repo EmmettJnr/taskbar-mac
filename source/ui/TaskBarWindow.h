@@ -20,16 +20,21 @@ using namespace std;
 class WindowInfo;
 @class TaskClient;
 @class AppleButton;
+@class QuickLaunch;
 
 @interface TaskBarWindow : NSPanel<NSWindowDelegate>
 {
     AppleButton *_appleButton;
+    QuickLaunch *_quickLaunch;
     NSRect rect;
     CVDisplayLinkRef displayLink;
     double lastRender;
-    
+
     std::vector<std::shared_ptr<WindowInfo>> _windows;
-    
+
+    int _dragWindowIndex;   // index in _windows of currently-dragged button, or -1
+    CGFloat _dragOffsetX;   // cursor offset within button at drag start
+
     id _mouseEventMonitor;
 }
 
@@ -48,4 +53,5 @@ class WindowInfo;
 
 -(void)globalLeftMouseDown;
 -(void)globalLeftMouseUp;
+-(void)handleWindowDrag:(ax::Window*)window event:(NSEvent*)event ended:(BOOL)ended;
 @end

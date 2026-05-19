@@ -6,6 +6,7 @@
 #include <ui/TaskBarWindow.h>
 #include <ui/AppleButton.h>
 #include <ui/MenuHelpers.h>
+#include <ui/QuickLaunch.h>
 #include <Cocoa/Cocoa.h>
 #include <AppKit/AppKit.h>
 #include <algorithm>
@@ -14,6 +15,7 @@
 #define START_BTN_WIDTH             64
 #define START_BTN_HEIGHT            32
 #define START_BTN_RIGHT_SPACING     0
+#define QL_RIGHT_SPACING            8   // gap between quick-launch and window-buttons when quick-launch is non-empty
 #define BUTTON_SIZE                 200
 #define BUTTON_SPACING              0
 #define UPDATE_RATE                 0.1f
@@ -64,7 +66,10 @@ public:
     
     self = [super initWithContentRect:rect styleMask:NSNonactivatingPanelMask backing:NSBackingStoreBuffered defer:NO];
     [self setDelegate:self];
-    
+
+    _dragWindowIndex = -1;
+    _dragOffsetX = 0;
+
     if(self)
     {
         NSString *title = @"MyTaskbar_865d3ddb-d43b-40f1-bc2d-74fcf3d725e7";
@@ -76,8 +81,14 @@ public:
         NSRect rc = NSMakeRect(BUTTON_SPACING, 0, START_BTN_WIDTH, START_BTN_HEIGHT);
         _appleButton = [[[AppleButton alloc] initWithFrame:rc] autorelease];
         [[self contentView] addSubview:_appleButton];
-        
+
         TaskBarWindow *tb = self;
+
+        int qlStartX = BUTTON_SPACING + START_BTN_WIDTH + START_BTN_RIGHT_SPACING;
+        _quickLaunch = [[QuickLaunch alloc] initWithParentView:[self contentView]
+                                                        startX:qlStartX
+                                                        height:TB_HEIGHT
+                                                     onChanged:^{ [tb startAnimation]; }];
         
         NSEventMask eventMask = NSLeftMouseDownMask | NSLeftMouseUpMask;
         
@@ -105,6 +116,7 @@ public:
 {
     [NSEvent removeMonitor:_mouseEventMonitor];
     CVDisplayLinkRelease(displayLink);
+    [_quickLaunch release];
     [super dealloc];
 }
 
@@ -128,6 +140,71 @@ public:
 {
     for(auto& info : _windows)
         [info->button globalLeftMouseUp];
+}
+
+-(void)handleWindowDrag:(ax::Window*)window event:(NSEvent*)event ended:(BOOL)ended
+{
+    int idx = -1;
+    for(int i = 0; i < (int)_windows.size(); i++)
+    {
+        if(_windows[i]->window == window) { idx = i; break; }
+    }
+    if(idx < 0) return;
+
+    HoverButton *btn = _windows[idx]->button;
+    int n = (int)_windows.size();
+
+    int qlWidth = _quickLaunch ? [_quickLaunch totalWidth] : 0;
+    int qlSpace = qlWidth > 0 ? qlWidth + QL_RIGHT_SPACING : 0;
+    int windowsBaseX = BUTTON_SPACING + START_BTN_WIDTH + START_BTN_RIGHT_SPACING + qlSpace;
+
+    float usedWidth = (float)windowsBaseX + (float)(max(n - 1, 0)) * BUTTON_SPACING;
+    float availableWidth = [self frame].size.width - usedWidth;
+    int maxButtonSize = n > 0 ? (int)(availableWidth / (float)n) : BUTTON_SIZE;
+    int perButton = std::min((int)BUTTON_SIZE, maxButtonSize);
+    if(perButton < 1) perButton = 1;
+
+    if(_dragWindowIndex == -1)
+    {
+        _dragWindowIndex = idx;
+        NSPoint pInWindow = [event locationInWindow];
+        NSPoint pInParent = [[self contentView] convertPoint:pInWindow fromView:nil];
+        _dragOffsetX = pInParent.x - btn.frame.origin.x;
+        [[self contentView] addSubview:btn positioned:NSWindowAbove relativeTo:nil];
+    }
+
+    NSPoint pInWindow = [event locationInWindow];
+    NSPoint pInParent = [[self contentView] convertPoint:pInWindow fromView:nil];
+    CGFloat newX = pInParent.x - _dragOffsetX;
+
+    int firstX = windowsBaseX;
+    int lastX  = windowsBaseX + (n - 1) * (perButton + BUTTON_SPACING);
+    if(newX < firstX) newX = firstX;
+    if(newX > lastX)  newX = lastX;
+
+    NSRect f = btn.frame;
+    f.origin.x = newX;
+    [btn setFrame:f];
+
+    int cursorOffset = (int)(pInParent.x - windowsBaseX);
+    int targetIdx = cursorOffset / (perButton + BUTTON_SPACING);
+    if(targetIdx < 0) targetIdx = 0;
+    if(targetIdx >= n) targetIdx = n - 1;
+
+    if(targetIdx != _dragWindowIndex)
+    {
+        std::swap(_windows[_dragWindowIndex], _windows[targetIdx]);
+        _dragWindowIndex = targetIdx;
+        [self startAnimation]; // trigger a layout pass for the non-dragged buttons
+    }
+
+    if(ended)
+    {
+        int gridX = windowsBaseX + _dragWindowIndex * (perButton + BUTTON_SPACING);
+        [btn setFrame:NSMakeRect(gridX, 0, perButton, TB_HEIGHT)];
+        _dragWindowIndex = -1;
+        [self startAnimation];
+    }
 }
 
 -(void)startAnimation
@@ -171,22 +248,33 @@ public:
 - (void)updateAnimation
 {
     float deltaTime = (float)(CACurrentMediaTime() - lastRender);
-    
-    float usedWidth = BUTTON_SPACING + START_BTN_WIDTH + START_BTN_RIGHT_SPACING;
+
+    int qlWidth = _quickLaunch ? [_quickLaunch totalWidth] : 0;
+    int qlSpace = qlWidth > 0 ? qlWidth + QL_RIGHT_SPACING : 0;
+    int windowsBaseX = BUTTON_SPACING + START_BTN_WIDTH + START_BTN_RIGHT_SPACING + qlSpace;
+
+    if(_windows.empty())
+    {
+        [self stopAnimation];
+        return;
+    }
+
+    float usedWidth = windowsBaseX;
     usedWidth += (float)(max((int)_windows.size() - 1, 0)) * BUTTON_SPACING;
-    
+
     float availableWidth = [self frame].size.width - usedWidth;
     int maxButtonSize = (int)(availableWidth / (float)_windows.size());
-    
-    int windowButtonX = BUTTON_SPACING + START_BTN_WIDTH + START_BTN_RIGHT_SPACING;
+
+    int windowButtonX = windowsBaseX;
     
     bool didUpdateButton = false;
-    
+
+    int i = 0;
     for(auto it = _windows.begin();
              it != _windows.end(); )
     {
         auto &info = (*it);
-        
+
         if(info->keep)
         {
             if(info->currentWidth < BUTTON_SIZE - 0.1f)
@@ -207,16 +295,22 @@ public:
                 didUpdateButton = true;
             }
         }
-        
+
         if(info->currentWidth > 0.1f)
         {
             int visibleWidth = min((int)info->currentWidth, maxButtonSize);
-            [info->button setFrame:NSMakeRect(windowButtonX, 0, visibleWidth, TB_HEIGHT)];
+            // The dragged button's frame is owned by the drag handler.
+            // Still reserve its slot so other buttons flow around it.
+            if(i != _dragWindowIndex)
+                [info->button setFrame:NSMakeRect(windowButtonX, 0, visibleWidth, TB_HEIGHT)];
             windowButtonX += visibleWidth + BUTTON_SPACING;
             ++it;
+            ++i;
         }
         else
         {
+            if(i == _dragWindowIndex) _dragWindowIndex = -1;
+            else if(_dragWindowIndex > i) _dragWindowIndex--;
             [info->button removeFromSuperview];
             it = _windows.erase(it);
         }
@@ -268,9 +362,11 @@ public:
     
     if(!runningApp)
         return;
-    
-    int windowButtonX = BUTTON_SPACING + START_BTN_WIDTH + START_BTN_RIGHT_SPACING;
-    
+
+    int qlWidth = _quickLaunch ? [_quickLaunch totalWidth] : 0;
+    int qlSpace = qlWidth > 0 ? qlWidth + QL_RIGHT_SPACING : 0;
+    int windowButtonX = BUTTON_SPACING + START_BTN_WIDTH + START_BTN_RIGHT_SPACING + qlSpace;
+
     for(auto &info : _windows)
         windowButtonX += info->currentWidth + BUTTON_SPACING;
     
@@ -299,30 +395,53 @@ public:
         else
             window->toggleFocusMinimize();
     };
+
+    [info->button setReorderDragEnabled:YES];
+    TaskBarWindow *taskbarSelf = self;
+    ax::Window *capturedWindow = window;
+    info->button.reorderDragAction = ^(NSEvent *event) {
+        [taskbarSelf handleWindowDrag:capturedWindow event:event ended:NO];
+    };
+    info->button.reorderDragEnded = ^(NSEvent *event) {
+        [taskbarSelf handleWindowDrag:capturedWindow event:event ended:YES];
+    };
     
+    QuickLaunch *quickLaunch = _quickLaunch;
+    NSString *bundleID = [[runningApp bundleIdentifier] copy];
+
     info->button.rightClickAction = [=](NSEvent *event)
     {
         NSMenu *menu = [[[NSMenu alloc] initWithTitle:@"AppMenu"] autorelease];
-        
+
         auto maximizeAction = [=](){
             window->maximize();
         };
-        
+
         auto minimizeAction = [=](){
             window->minimize();
         };
-        
+
         auto closeAction = [=](){
             window->close();
         };
-        
+
         [menu addItem:[ActionItem itemWithTitle:@"Maximize" action:maximizeAction]];
         [menu addItem:[NSMenuItem separatorItem]];
         [menu addItem:[ActionItem itemWithTitle:@"Minimize" action:minimizeAction]];
         [menu addItem:[NSMenuItem separatorItem]];
         [menu addItem:[ActionItem itemWithTitle:@"Close" action:closeAction]];
+
+        if(bundleID && ![quickLaunch isPinned:bundleID])
+        {
+            [menu addItem:[NSMenuItem separatorItem]];
+            auto pinAction = [=](){
+                [quickLaunch pinBundleID:bundleID];
+            };
+            [menu addItem:[ActionItem itemWithTitle:@"Pin to Quick Launch" action:pinAction]];
+        }
+
         [menu addItem:[ForceMenuPos forcePosItem:[NSEvent mouseLocation] level:NSDockWindowLevel + 1]];
-        
+
         [NSMenu popUpContextMenu:menu withEvent:event forView:info->button];
     };
     

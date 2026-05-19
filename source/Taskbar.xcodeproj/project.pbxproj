@@ -32,6 +32,7 @@
 		373BFBF81CF5480B009356CE /* AppleIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 373BFBF71CF5480B009356CE /* AppleIcon.icns */; };
 		37A4B3191E43C42700E08A50 /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 37A4B3181E43C42700E08A50 /* Images.xcassets */; };
 		37CE8F581E453A5F009E8842 /* MenuHelpers.mm in Sources */ = {isa = PBXBuildFile; fileRef = 37CE8F571E453A5F009E8842 /* MenuHelpers.mm */; };
+		BEE000000000000000000003 /* QuickLaunch.mm in Sources */ = {isa = PBXBuildFile; fileRef = BEE000000000000000000002 /* QuickLaunch.mm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +64,8 @@
 		3736E3411CEFB5C9003CC223 /* ShortcutsWindow.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; lineEnding = 0; path = ShortcutsWindow.mm; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.objcpp; };
 		3736E3421CEFB5C9003CC223 /* StartMenu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = StartMenu.h; sourceTree = "<group>"; };
 		3736E3431CEFB5C9003CC223 /* StartMenu.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; lineEnding = 0; path = StartMenu.mm; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.objcpp; };
+		BEE000000000000000000001 /* QuickLaunch.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = QuickLaunch.h; sourceTree = "<group>"; };
+		BEE000000000000000000002 /* QuickLaunch.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = QuickLaunch.mm; sourceTree = "<group>"; };
 		3736E3441CEFB5C9003CC223 /* TaskBarWindow.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TaskBarWindow.h; sourceTree = "<group>"; };
 		3736E3451CEFB5C9003CC223 /* TaskBarWindow.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = TaskBarWindow.mm; sourceTree = "<group>"; };
 		3736E3461CEFB5C9003CC223 /* Utils.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; lineEnding = 0; path = Utils.h; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.objcpp; };
@@ -161,6 +164,8 @@
 				3736E3411CEFB5C9003CC223 /* ShortcutsWindow.mm */,
 				3736E3421CEFB5C9003CC223 /* StartMenu.h */,
 				3736E3431CEFB5C9003CC223 /* StartMenu.mm */,
+				BEE000000000000000000001 /* QuickLaunch.h */,
+				BEE000000000000000000002 /* QuickLaunch.mm */,
 				3736E3441CEFB5C9003CC223 /* TaskBarWindow.h */,
 				3736E3451CEFB5C9003CC223 /* TaskBarWindow.mm */,
 				3736E3461CEFB5C9003CC223 /* Utils.h */,
@@ -270,6 +275,7 @@
 				3736E3511CEFB5CA003CC223 /* ShortcutsWindow.mm in Sources */,
 				3736E3541CEFB5CA003CC223 /* Utils.mm in Sources */,
 				3736E3521CEFB5CA003CC223 /* StartMenu.mm in Sources */,
+				BEE000000000000000000003 /* QuickLaunch.mm in Sources */,
 				3736E3491CEFB5C9003CC223 /* Attribute.mm in Sources */,
 				3736E3501CEFB5CA003CC223 /* HoverButton.mm in Sources */,
 				3736E34F1CEFB5C9003CC223 /* AppleButton.mm in Sources */,

@@ -38,16 +38,27 @@ struct WindowInfo;
     function<void(NSEvent*)> _leftClickAction;
     function<void(NSEvent*)> _rightClickAction;
     function<void()> _dragAction;
+    function<void(NSEvent*)> _reorderDragAction;
+    function<void(NSEvent*)> _reorderDragEnded;
     BOOL _enabled;
-    
+    BOOL _reorderDragEnabled;
+
     NSTimer *_hoverTimer;
     bool _mouseDown;
     bool _leftDown;
     bool _rightDown;
+    bool _wasDragged;
+    NSPoint _mouseDownPoint;
 }
 @property function<void(NSEvent*)> leftClickAction;
 @property function<void(NSEvent*)> rightClickAction;
 @property function<void()> dragAction;
+// Reorder-drag callbacks: invoked when the user drags this button beyond a threshold.
+// reorderDragAction fires on each mouseDragged; reorderDragEnded fires on mouseUp after a drag.
+// When a drag occurs, leftClickAction is suppressed.
+@property function<void(NSEvent*)> reorderDragAction;
+@property function<void(NSEvent*)> reorderDragEnded;
+@property BOOL reorderDragEnabled;
 @property BOOL isEnabled;
 -(id)initWithFrame:(NSRect)frame title:(NSString*)title;
 -(void)setHotImage:(NSImage*)image;

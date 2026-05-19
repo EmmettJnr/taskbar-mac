@@ -231,6 +231,30 @@
     _dragAction = fn;
 }
 
+- (function<void(NSEvent*)>)reorderDragAction {
+    return _reorderDragAction;
+}
+
+- (void)setReorderDragAction:(function<void(NSEvent*)>)fn {
+    _reorderDragAction = fn;
+}
+
+- (function<void(NSEvent*)>)reorderDragEnded {
+    return _reorderDragEnded;
+}
+
+- (void)setReorderDragEnded:(function<void(NSEvent*)>)fn {
+    _reorderDragEnded = fn;
+}
+
+- (BOOL)reorderDragEnabled {
+    return _reorderDragEnabled;
+}
+
+- (void)setReorderDragEnabled:(BOOL)enabled {
+    _reorderDragEnabled = enabled;
+}
+
 - (BOOL)isEnabled {
     return _enabled;
 }
@@ -277,12 +301,33 @@
     if(!_rightDown)
     {
         _leftDown = true;
-        
+        _wasDragged = false;
+        _mouseDownPoint = [theEvent locationInWindow];
+
         buttonCell->_down = true;
         [self setNeedsDisplay:YES];
-        
+
         [self cancelHoverTimer];
     }
+}
+
+-(void)mouseDragged:(NSEvent*)theEvent
+{
+    if(!_leftDown || !_reorderDragEnabled) return;
+
+    if(!_wasDragged)
+    {
+        // require a small threshold so a tiny jitter doesn't cancel a click
+        NSPoint now = [theEvent locationInWindow];
+        CGFloat dx = now.x - _mouseDownPoint.x;
+        CGFloat dy = now.y - _mouseDownPoint.y;
+        if(dx*dx + dy*dy < 9.0) // ~3px
+            return;
+        _wasDragged = true;
+    }
+
+    if(_reorderDragAction)
+        _reorderDragAction(theEvent);
 }
 
 -(void)mouseUp:(NSEvent *)theEvent
@@ -290,11 +335,16 @@
     if(_leftDown)
     {
         _leftDown = false;
-        
+
         buttonCell->_down = false;
         [self setNeedsDisplay:YES];
-        
-        if(_enabled && _leftClickAction)
+
+        if(_wasDragged)
+        {
+            if(_reorderDragEnded)
+                _reorderDragEnded(theEvent);
+        }
+        else if(_enabled && _leftClickAction)
         {
             NSPoint pos = [self convertPoint:[theEvent locationInWindow] fromView:nil];
             bool inside = [self mouse:pos inRect:[self bounds]];
