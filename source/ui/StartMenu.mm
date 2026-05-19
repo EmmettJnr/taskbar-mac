@@ -102,7 +102,7 @@
     [subMenuItem setRepresentedObject:[NSArray arrayWithObjects:subMenuItem, path, nil]];
     [subMenuItem setImage:icon];
     
-    StartMenu *subMenu = [StartMenu menuAsSubmenu:self path:[path retain]];
+    StartMenu *subMenu = [StartMenu menuAsSubmenu:rootMenu path:[path retain]];
     [subMenuItem setSubmenu:subMenu];
     
     return subMenuItem;
