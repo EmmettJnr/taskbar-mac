@@ -1,3 +1,7 @@
+EmmettJnr: Updated for modern macOS with additional features such as a quick launch.
+
+## Original readme
+
 This project offers robust window management for macOS.
 
 ## Installation
