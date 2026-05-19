@@ -39,6 +39,11 @@ class WindowInfo;
     CGFloat _dragOffsetX;   // cursor offset within button at drag start
 
     id _mouseEventMonitor;
+    CFMachPortRef _keyEventTap;
+    CFRunLoopSourceRef _keyEventTapSource;
+    NSTimeInterval _cmdDownTime;
+    BOOL _cmdHeld;
+    BOOL _cmdTapClean;
 }
 
 -(id)init;

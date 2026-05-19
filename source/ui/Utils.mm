@@ -102,6 +102,16 @@
     [dock terminate];
 }
 
++ (BOOL)isCmdTapToggleEnabled
+{
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"CmdTapToggleStartMenu"];
+}
+
++ (void)enableCmdTapToggle:(BOOL)enable
+{
+    [[NSUserDefaults standardUserDefaults] setBool:enable forKey:@"CmdTapToggleStartMenu"];
+}
+
 + (NSColor*)backgroundColor {
     return [NSColor windowBackgroundColor];
 }

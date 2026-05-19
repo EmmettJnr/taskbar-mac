@@ -8,6 +8,7 @@
 #include <ui/MenuHelpers.h>
 #include <ui/QuickLaunch.h>
 #include <ui/HoverButton.h>
+#include <ui/Utils.h>
 #include <Cocoa/Cocoa.h>
 #include <AppKit/AppKit.h>
 #include <algorithm>
@@ -28,6 +29,8 @@
 @interface TaskBarWindow ()
 -(void)showDesktop;
 -(void)emptyTrash;
+-(void)handleModifierEvent:(NSEvent*)event;
+-(void)rearmKeyEventTap;
 @end
 
 // Thin, near-transparent peek-style button anchored at the far right.
@@ -73,6 +76,22 @@
 -(void)mouseExited:(NSEvent*)e  { _hot = NO;  [self setNeedsDisplay:YES]; }
 -(void)mouseDown:(NSEvent*)e    { if(_action) _action(); }
 @end
+
+static CGEventRef TaskBarKeyEventTapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *userInfo)
+{
+    TaskBarWindow *tb = (__bridge TaskBarWindow*)userInfo;
+    if(type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput)
+    {
+        // System disabled our tap (often after a slow callback). Re-enable.
+        // Without this the close-on-second-tap stops working after a hiccup.
+        [tb rearmKeyEventTap];
+        return event;
+    }
+    NSEvent *nsEvent = [NSEvent eventWithCGEvent:event];
+    if(nsEvent)
+        [tb handleModifierEvent:nsEvent];
+    return event;
+}
 
 CVReturn RenderTaskBarButtons(CVDisplayLinkRef displayLink,
                               const CVTimeStamp *inNow,
@@ -188,6 +207,7 @@ public:
         {
             if(event.type == NSLeftMouseDown)
             {
+                if(tb->_cmdHeld) tb->_cmdTapClean = NO;
                 [tb globalLeftMouseDown];
             }
             else if(event.type == NSLeftMouseUp)
@@ -195,7 +215,25 @@ public:
                 [tb globalLeftMouseUp];
             }
         }];
-        
+
+        _cmdHeld = NO;
+        _cmdTapClean = NO;
+        _cmdDownTime = 0;
+
+        CGEventMask tapMask = CGEventMaskBit(kCGEventFlagsChanged) | CGEventMaskBit(kCGEventKeyDown);
+        _keyEventTap = CGEventTapCreate(kCGSessionEventTap,
+                                        kCGHeadInsertEventTap,
+                                        kCGEventTapOptionListenOnly,
+                                        tapMask,
+                                        TaskBarKeyEventTapCallback,
+                                        (__bridge void*)self);
+        if(_keyEventTap)
+        {
+            _keyEventTapSource = CFMachPortCreateRunLoopSource(NULL, _keyEventTap, 0);
+            CFRunLoopAddSource(CFRunLoopGetMain(), _keyEventTapSource, kCFRunLoopCommonModes);
+            CGEventTapEnable(_keyEventTap, true);
+        }
+
         CVDisplayLinkCreateWithActiveCGDisplays(&displayLink);
         CVDisplayLinkSetCurrentCGDisplay(displayLink, CGMainDisplayID());
         CVDisplayLinkSetOutputCallback(displayLink, &RenderTaskBarButtons, (void*)self);
@@ -207,6 +245,13 @@ public:
 - (void)dealloc
 {
     [NSEvent removeMonitor:_mouseEventMonitor];
+    if(_keyEventTap)
+    {
+        CGEventTapEnable(_keyEventTap, false);
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), _keyEventTapSource, kCFRunLoopCommonModes);
+        CFRelease(_keyEventTapSource);
+        CFRelease(_keyEventTap);
+    }
     CVDisplayLinkRelease(displayLink);
     [_quickLaunch release];
     [_trashButton release];
@@ -234,6 +279,44 @@ public:
 {
     for(auto& info : _windows)
         [info->button globalLeftMouseUp];
+}
+
+-(void)rearmKeyEventTap
+{
+    if(_keyEventTap) CGEventTapEnable(_keyEventTap, true);
+}
+
+-(void)handleModifierEvent:(NSEvent*)event
+{
+    if(event.type == NSEventTypeKeyDown)
+    {
+        if(_cmdHeld) _cmdTapClean = NO;
+        return;
+    }
+
+    NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    BOOL cmdNow = (flags & NSEventModifierFlagCommand) != 0;
+    BOOL otherModsNow = (flags & ~NSEventModifierFlagCommand) != 0;
+
+    if(cmdNow && !_cmdHeld)
+    {
+        _cmdHeld = YES;
+        _cmdDownTime = [NSDate timeIntervalSinceReferenceDate];
+        _cmdTapClean = !otherModsNow;
+    }
+    else if(!cmdNow && _cmdHeld)
+    {
+        _cmdHeld = NO;
+        NSTimeInterval elapsed = [NSDate timeIntervalSinceReferenceDate] - _cmdDownTime;
+        BOOL fire = _cmdTapClean && !otherModsNow && elapsed < 0.3 && Utils.isCmdTapToggleEnabled;
+        _cmdTapClean = NO;
+        if(fire)
+            [_appleButton toggleStartMenu];
+    }
+    else if(cmdNow && otherModsNow)
+    {
+        _cmdTapClean = NO;
+    }
 }
 
 -(void)showDesktop

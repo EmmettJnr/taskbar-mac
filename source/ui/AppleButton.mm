@@ -10,6 +10,7 @@
 #include <ui/StartMenu.h>
 #include <ui/ShortcutsWindow.h>
 #include <ui/MenuHelpers.h>
+#include <ui/Utils.h>
 
 @implementation AppleButton
 
@@ -25,7 +26,7 @@
         [[self hoverButtonCell] setImagePosition:NSImageOnly];
         
         self.leftClickAction = [=](NSEvent *theEvent){
-            [[StartMenu rootMenu:self] popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, 32) inView:self];
+            [self toggleStartMenu];
         };
         
         self.rightClickAction = [=](NSEvent *theEvent){
@@ -47,8 +48,10 @@
             }
 
             [menu insertItemWithTitle:@"Toggle Fast Dock" action:@selector(onClickToggleFastDock:) keyEquivalent:@"" atIndex:1];
-            [menu insertItemWithTitle:@"Edit Shortcuts" action:@selector(onClickEditShortcuts:) keyEquivalent:@"" atIndex:2];
-            [menu insertItemWithTitle:@"Quit Taskbar" action:@selector(onClickedQuit:) keyEquivalent:@"" atIndex:3];
+            NSMenuItem *cmdTapItem = [menu insertItemWithTitle:@"Toggle Start Menu with ⌘ Tap" action:@selector(onClickToggleCmdTap:) keyEquivalent:@"" atIndex:2];
+            [cmdTapItem setState:Utils.isCmdTapToggleEnabled ? NSControlStateValueOn : NSControlStateValueOff];
+            [menu insertItemWithTitle:@"Edit Shortcuts" action:@selector(onClickEditShortcuts:) keyEquivalent:@"" atIndex:3];
+            [menu insertItemWithTitle:@"Quit Taskbar" action:@selector(onClickedQuit:) keyEquivalent:@"" atIndex:4];
             [menu addItem:[ForceMenuPos forcePosItem:[NSEvent mouseLocation] level:NSDockWindowLevel + 1]];
         
             [NSMenu popUpContextMenu:menu withEvent:theEvent forView:self];
@@ -60,11 +63,31 @@
 
 -(void)dealloc
 {
+    [_currentMenu release];
     [super dealloc];
+}
+
+- (void)toggleStartMenu
+{
+    if(_currentMenu)
+    {
+        [_currentMenu cancelTracking];
+        return;
+    }
+
+    NSMenu *menu = [StartMenu rootMenu:self];
+    _currentMenu = [menu retain];
+    [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, 32) inView:self];
+    [_currentMenu release];
+    _currentMenu = nil;
 }
 
 - (void)onClickToggleFastDock:(NSEvent*)theEvent {
     [Utils enableFastDock: !Utils.isFastDockEnabled];
+}
+
+- (void)onClickToggleCmdTap:(NSEvent*)theEvent {
+    [Utils enableCmdTapToggle: !Utils.isCmdTapToggleEnabled];
 }
 
 - (void)onClickEditShortcuts:(NSEvent*)theEvent

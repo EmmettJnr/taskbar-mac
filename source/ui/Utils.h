@@ -24,4 +24,6 @@ using namespace std;
 + (NSColor*)textColorFocused;
 + (BOOL)isFastDockEnabled;
 + (void)enableFastDock:(BOOL)enable;
++ (BOOL)isCmdTapToggleEnabled;
++ (void)enableCmdTapToggle:(BOOL)enable;
 @end
