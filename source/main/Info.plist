@@ -30,6 +30,8 @@
 	<true/>
 	<key>LSUIElement</key>
 	<string>1</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Taskbar uses Apple events to control Finder when emptying the Trash.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2017 Showdown Software. All rights reserved.</string>
 	<key>NSPrincipalClass</key>

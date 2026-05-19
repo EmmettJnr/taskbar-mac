@@ -21,11 +21,14 @@ class WindowInfo;
 @class TaskClient;
 @class AppleButton;
 @class QuickLaunch;
+@class HoverButton;
 
 @interface TaskBarWindow : NSPanel<NSWindowDelegate>
 {
     AppleButton *_appleButton;
     QuickLaunch *_quickLaunch;
+    HoverButton *_trashButton;
+    NSView *_showDesktopButton;
     NSRect rect;
     CVDisplayLinkRef displayLink;
     double lastRender;

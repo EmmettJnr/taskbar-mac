@@ -7,6 +7,7 @@
 #include <ui/AppleButton.h>
 #include <ui/MenuHelpers.h>
 #include <ui/QuickLaunch.h>
+#include <ui/HoverButton.h>
 #include <Cocoa/Cocoa.h>
 #include <AppKit/AppKit.h>
 #include <algorithm>
@@ -20,6 +21,58 @@
 #define BUTTON_SPACING              0
 #define UPDATE_RATE                 0.1f
 #define BUTTON_EXPAND_SPEED         3.0f
+#define TRASH_BTN_WIDTH             32
+#define SHOW_DESK_BTN_WIDTH         8
+#define WINDOWS_RIGHT_SPACING       4   // gap between window-buttons and trash
+
+@interface TaskBarWindow ()
+-(void)showDesktop;
+-(void)emptyTrash;
+@end
+
+// Thin, near-transparent peek-style button anchored at the far right.
+@interface ShowDesktopButton : NSView
+{
+    BOOL _hot;
+    void (^_action)(void);
+}
+-(id)initWithFrame:(NSRect)frame action:(void(^)(void))action;
+@end
+
+@implementation ShowDesktopButton
+-(id)initWithFrame:(NSRect)frame action:(void(^)(void))action
+{
+    self = [super initWithFrame:frame];
+    if(self)
+    {
+        _hot = NO;
+        _action = [action copy];
+        NSTrackingArea *area = [[NSTrackingArea alloc]
+            initWithRect:NSZeroRect
+                 options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+                   owner:self userInfo:nil];
+        [self addTrackingArea:area];
+        [area release];
+    }
+    return self;
+}
+-(void)dealloc { [_action release]; [super dealloc]; }
+-(void)drawRect:(NSRect)dirty
+{
+    NSRect b = [self bounds];
+    if(_hot)
+    {
+        [[NSColor colorWithWhite:1.0 alpha:0.18] setFill];
+        NSRectFillUsingOperation(b, NSCompositingOperationSourceOver);
+    }
+    // subtle vertical separator on the left edge
+    [[NSColor colorWithWhite:0.5 alpha:0.35] setFill];
+    NSRectFill(NSMakeRect(0, 4, 1, b.size.height - 8));
+}
+-(void)mouseEntered:(NSEvent*)e { _hot = YES; [self setNeedsDisplay:YES]; }
+-(void)mouseExited:(NSEvent*)e  { _hot = NO;  [self setNeedsDisplay:YES]; }
+-(void)mouseDown:(NSEvent*)e    { if(_action) _action(); }
+@end
 
 CVReturn RenderTaskBarButtons(CVDisplayLinkRef displayLink,
                               const CVTimeStamp *inNow,
@@ -89,6 +142,45 @@ public:
                                                         startX:qlStartX
                                                         height:TB_HEIGHT
                                                      onChanged:^{ [tb startAnimation]; }];
+
+        // Right-anchored buttons: trash + thin show-desktop strip
+        CGFloat barWidth = rect.size.width;
+        NSRect showDeskFrame = NSMakeRect(barWidth - SHOW_DESK_BTN_WIDTH, 0, SHOW_DESK_BTN_WIDTH, TB_HEIGHT);
+        _showDesktopButton = [[ShowDesktopButton alloc] initWithFrame:showDeskFrame
+                                                               action:^{ [tb showDesktop]; }];
+        [_showDesktopButton setAutoresizingMask:NSViewMinXMargin];
+        [[self contentView] addSubview:_showDesktopButton];
+
+        NSRect trashFrame = NSMakeRect(barWidth - SHOW_DESK_BTN_WIDTH - TRASH_BTN_WIDTH, 0,
+                                       TRASH_BTN_WIDTH, TB_HEIGHT);
+        _trashButton = [[HoverButton alloc] initWithFrame:trashFrame title:@""];
+        NSString *trashPath = [[@"~/.Trash" stringByExpandingTildeInPath] copy];
+        NSImage *trashIcon = [[NSWorkspace sharedWorkspace] iconForFile:trashPath];
+        [_trashButton setImage:trashIcon];
+        [_trashButton setImagePosition:NSImageOnly];
+        [_trashButton setAutoresizingMask:NSViewMinXMargin];
+        _trashButton.leftClickAction = ^(NSEvent *event) {
+            [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:trashPath]];
+        };
+        HoverButton *trashBtn = _trashButton;
+        _trashButton.rightClickAction = ^(NSEvent *event) {
+            NSMenu *menu = [[[NSMenu alloc] initWithTitle:@"TrashMenu"] autorelease];
+
+            auto openAction = [=]() {
+                [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:trashPath]];
+            };
+            auto emptyAction = [=]() {
+                [tb emptyTrash];
+            };
+
+            [menu addItem:[ActionItem itemWithTitle:@"Open" action:openAction]];
+            [menu addItem:[NSMenuItem separatorItem]];
+            [menu addItem:[ActionItem itemWithTitle:@"Empty Trash…" action:emptyAction]];
+            [menu addItem:[ForceMenuPos forcePosItem:[NSEvent mouseLocation] level:NSDockWindowLevel + 1]];
+
+            [NSMenu popUpContextMenu:menu withEvent:event forView:trashBtn];
+        };
+        [[self contentView] addSubview:_trashButton];
         
         NSEventMask eventMask = NSLeftMouseDownMask | NSLeftMouseUpMask;
         
@@ -117,6 +209,8 @@ public:
     [NSEvent removeMonitor:_mouseEventMonitor];
     CVDisplayLinkRelease(displayLink);
     [_quickLaunch release];
+    [_trashButton release];
+    [_showDesktopButton release];
     [super dealloc];
 }
 
@@ -142,6 +236,61 @@ public:
         [info->button globalLeftMouseUp];
 }
 
+-(void)showDesktop
+{
+    // Simulate the system "Show Desktop" shortcut (F11 by default in
+    // System Settings → Keyboard → Shortcuts → Mission Control).
+    // macOS handles the toggle itself: first press slides windows to the
+    // screen edges, second press restores them.
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    CGEventRef keyDown = CGEventCreateKeyboardEvent(source, 0x67 /* kVK_F11 */, true);
+    CGEventRef keyUp   = CGEventCreateKeyboardEvent(source, 0x67 /* kVK_F11 */, false);
+    CGEventPost(kCGHIDEventTap, keyDown);
+    CGEventPost(kCGHIDEventTap, keyUp);
+    CFRelease(keyDown);
+    CFRelease(keyUp);
+    CFRelease(source);
+}
+
+-(void)emptyTrash
+{
+    NSAlert *alert = [[NSAlert alloc] init];
+    [alert setMessageText:@"Are you sure you want to permanently erase the items in the Trash?"];
+    [alert setInformativeText:@"You can't undo this action."];
+    [alert addButtonWithTitle:@"Empty Trash"];
+    [alert addButtonWithTitle:@"Cancel"];
+    [[[alert buttons] objectAtIndex:0] setHasDestructiveAction:YES];
+
+    NSModalResponse response = [alert runModal];
+    [alert release];
+
+    if(response == NSAlertFirstButtonReturn)
+    {
+        NSDictionary *errInfo = nil;
+        NSAppleScript *script = [[NSAppleScript alloc] initWithSource:@"tell application \"Finder\" to empty trash"];
+        NSAppleEventDescriptor *result = [script executeAndReturnError:&errInfo];
+        [script release];
+
+        if(!result)
+        {
+            NSString *msg = [errInfo objectForKey:NSAppleScriptErrorMessage] ?: @"Unknown error.";
+            NSNumber *code = [errInfo objectForKey:NSAppleScriptErrorNumber];
+            if(code && [code intValue] == -1743)
+                msg = @"Taskbar isn't allowed to control Finder. Open System Settings → Privacy & Security → Automation, find Taskbar, and enable Finder.";
+
+            NSAlert *err = [[NSAlert alloc] init];
+            [err setMessageText:@"Couldn't empty the Trash"];
+            [err setInformativeText:msg];
+            [err addButtonWithTitle:@"OK"];
+            [err runModal];
+            [err release];
+        }
+
+        if(result)
+            [_trashButton setImage:[NSImage imageNamed:NSImageNameTrashEmpty]];
+    }
+}
+
 -(void)handleWindowDrag:(ax::Window*)window event:(NSEvent*)event ended:(BOOL)ended
 {
     int idx = -1;
@@ -159,7 +308,8 @@ public:
     int windowsBaseX = BUTTON_SPACING + START_BTN_WIDTH + START_BTN_RIGHT_SPACING + qlSpace;
 
     float usedWidth = (float)windowsBaseX + (float)(max(n - 1, 0)) * BUTTON_SPACING;
-    float availableWidth = [self frame].size.width - usedWidth;
+    int rightReserve = TRASH_BTN_WIDTH + SHOW_DESK_BTN_WIDTH + WINDOWS_RIGHT_SPACING;
+    float availableWidth = [self frame].size.width - usedWidth - rightReserve;
     int maxButtonSize = n > 0 ? (int)(availableWidth / (float)n) : BUTTON_SIZE;
     int perButton = std::min((int)BUTTON_SIZE, maxButtonSize);
     if(perButton < 1) perButton = 1;
@@ -262,7 +412,8 @@ public:
     float usedWidth = windowsBaseX;
     usedWidth += (float)(max((int)_windows.size() - 1, 0)) * BUTTON_SPACING;
 
-    float availableWidth = [self frame].size.width - usedWidth;
+    int rightReserve = TRASH_BTN_WIDTH + SHOW_DESK_BTN_WIDTH + WINDOWS_RIGHT_SPACING;
+    float availableWidth = [self frame].size.width - usedWidth - rightReserve;
     int maxButtonSize = (int)(availableWidth / (float)_windows.size());
 
     int windowButtonX = windowsBaseX;
