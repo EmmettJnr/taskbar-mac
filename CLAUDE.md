@@ -16,18 +16,16 @@ xcodebuild -project source/Taskbar.xcodeproj -scheme Taskbar -configuration Rele
 
 Output: `bin/Taskbar.app` (universal: arm64 + x86_64). Deployment target is macOS 11.0.
 
-## Install (required for TCC to persist)
+## Run (required for TCC to persist)
 
-Linker-emitted ad-hoc signatures don't give TCC a stable identity, so the OS will re-prompt for Accessibility on every launch. After building:
+Linker-emitted ad-hoc signatures don't give TCC a stable identity, so the OS will re-prompt for Accessibility on every launch. After building, re-sign and launch in place from `bin/`:
 
 ```sh
 codesign --force --deep --sign - bin/Taskbar.app
-cp -R bin/Taskbar.app /Applications/
-tccutil reset Accessibility com.showdownsoftware.taskbar  # if a stale grant exists
-open /Applications/Taskbar.app
+open bin/Taskbar.app
 ```
 
-Then grant Accessibility in System Settings → Privacy & Security → Accessibility.
+On first launch, grant Accessibility in System Settings → Privacy & Security → Accessibility. TCC keys the grant on the binary's cdhash, and ad-hoc `codesign --force --sign -` produces a new cdhash whenever the binary content changes — so every rebuild invalidates the grant and you'll need to re-toggle Taskbar in the Accessibility pane. A stable signing identity would avoid this. To clear a stale entry: `tccutil reset Accessibility com.showdownsoftware.taskbar`.
 
 ## Code conventions
 

@@ -146,7 +146,13 @@ int Window::update()
             
             if(subRole != windowSubrole && subRole != dialogSubrole)
                 throw window_type_error("error: window subrole is not 'AXStandardWindow' or 'AXDialog'");
-            
+
+            // Filter transient borderless windows (tooltips, popup menus) used by
+            // non-native UI toolkits like UE5's Slate. They surface as AXWindow but
+            // lack the standard window controls a user-facing window would have.
+            if(_element.hasAttribute(kAXCloseButtonAttribute) != 1)
+                throw window_type_error("error: window has no close button");
+
             Attribute attTitle = _element.attributeFor(kAXTitleAttribute);
             if(!attTitle)
                 throw runtime_error("failed to retrieve window title: " + _title);
