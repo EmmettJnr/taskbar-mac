@@ -1,4 +1,4 @@
-EmmettJnr: Updated for modern macOS with additional features such as a quick launch.
+EmmettJnr: Updated for modern macOS with additional features such as a quick launch, reordering of items, clock (needs to be made configurable - currently hardcoded to dd/MM/yyyy) and battery display.
 
 ## Original readme
 
