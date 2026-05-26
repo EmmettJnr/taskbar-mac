@@ -1,5 +1,7 @@
 EmmettJnr: Updated for modern macOS with additional features such as a quick launch, reordering of items, clock (needs to be made configurable - currently hardcoded to dd/MM/yyyy) and battery display.
 
+This works quite well paired with always auto hiding the top menu bar, moving the dock to the right, auto hiding it and optionally making it smaller.
+
 ## Original readme
 
 This project offers robust window management for macOS.
