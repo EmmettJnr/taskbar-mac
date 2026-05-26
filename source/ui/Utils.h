@@ -26,4 +26,8 @@ using namespace std;
 + (void)enableFastDock:(BOOL)enable;
 + (BOOL)isCmdTapToggleEnabled;
 + (void)enableCmdTapToggle:(BOOL)enable;
++ (BOOL)isClockHidden;
++ (void)setClockHidden:(BOOL)hidden;
++ (BOOL)isBatteryHidden;
++ (void)setBatteryHidden:(BOOL)hidden;
 @end

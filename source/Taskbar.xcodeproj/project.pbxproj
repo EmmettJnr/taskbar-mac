@@ -391,6 +391,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = "";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				OTHER_LDFLAGS = "-framework IOKit";
 				PRODUCT_BUNDLE_IDENTIFIER = com.showdownsoftware.taskbar;
 			};
 			name = Debug;
@@ -403,6 +404,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CONFIGURATION_BUILD_DIR = ../bin;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				OTHER_LDFLAGS = "-framework IOKit";
 				PRODUCT_BUNDLE_IDENTIFIER = com.showdownsoftware.taskbar;
 			};
 			name = Release;

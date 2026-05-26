@@ -112,6 +112,26 @@
     [[NSUserDefaults standardUserDefaults] setBool:enable forKey:@"CmdTapToggleStartMenu"];
 }
 
++ (BOOL)isClockHidden
+{
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"HideClock"];
+}
+
++ (void)setClockHidden:(BOOL)hidden
+{
+    [[NSUserDefaults standardUserDefaults] setBool:hidden forKey:@"HideClock"];
+}
+
++ (BOOL)isBatteryHidden
+{
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"HideBattery"];
+}
+
++ (void)setBatteryHidden:(BOOL)hidden
+{
+    [[NSUserDefaults standardUserDefaults] setBool:hidden forKey:@"HideBattery"];
+}
+
 + (NSColor*)backgroundColor {
     return [NSColor windowBackgroundColor];
 }

@@ -11,6 +11,8 @@
 #include <ui/Utils.h>
 #include <Cocoa/Cocoa.h>
 #include <AppKit/AppKit.h>
+#include <IOKit/ps/IOPowerSources.h>
+#include <IOKit/ps/IOPSKeys.h>
 #include <algorithm>
 
 #define TB_HEIGHT                   32
@@ -24,13 +26,19 @@
 #define BUTTON_EXPAND_SPEED         3.0f
 #define TRASH_BTN_WIDTH             32
 #define SHOW_DESK_BTN_WIDTH         8
-#define WINDOWS_RIGHT_SPACING       4   // gap between window-buttons and trash
+#define CLOCK_WIDTH                 84
+#define CLOCK_TRASH_SPACING         2   // gap between clock and trash
+#define BATTERY_WIDTH               40
+#define BATTERY_CLOCK_SPACING       4   // gap between battery and clock
+#define WINDOWS_RIGHT_SPACING       4   // gap between window-buttons and the right-anchored cluster
 
 @interface TaskBarWindow ()
 -(void)showDesktop;
 -(void)emptyTrash;
 -(void)handleModifierEvent:(NSEvent*)event;
 -(void)rearmKeyEventTap;
+-(void)rebuildRightWidgets;
+-(NSMenu*)buildWidgetsMenu;
 @end
 
 // Thin, near-transparent peek-style button anchored at the far right.
@@ -76,6 +84,277 @@
 -(void)mouseExited:(NSEvent*)e  { _hot = NO;  [self setNeedsDisplay:YES]; }
 -(void)mouseDown:(NSEvent*)e    { if(_action) _action(); }
 @end
+
+// Two-line clock: time on top, date below. Updates every second but only
+// re-renders when the visible string changes. Locale-aware via templated
+// date formats.
+@interface ClockView : NSView
+{
+@public
+    NSMenu *(^menuBuilder)(void);
+@private
+    NSTextField *_timeLabel;
+    NSTextField *_dateLabel;
+    NSDateFormatter *_timeFmt;
+    NSDateFormatter *_dateFmt;
+    NSTimer *_timer;
+    NSString *_lastTime;
+    NSString *_lastDate;
+}
+@end
+
+@implementation ClockView
+-(id)initWithFrame:(NSRect)frame
+{
+    self = [super initWithFrame:frame];
+    if(self)
+    {
+        NSLocale *locale = [NSLocale autoupdatingCurrentLocale];
+
+        _timeFmt = [[NSDateFormatter alloc] init];
+        [_timeFmt setLocale:locale];
+        [_timeFmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"jmm" options:0 locale:locale]];
+
+        _dateFmt = [[NSDateFormatter alloc] init];
+        [_dateFmt setLocale:locale];
+        [_dateFmt setDateFormat:@"dd/MM/yyyy"];
+
+        CGFloat w = frame.size.width;
+        CGFloat h = frame.size.height;
+        // Y origins chosen to nest the two lines snugly within TB_HEIGHT=32.
+        _timeLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, h * 0.5 - 1, w, 14)];
+        _dateLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 1,           w, 12)];
+        for(NSTextField *lbl in @[_timeLabel, _dateLabel])
+        {
+            [lbl setBezeled:NO];
+            [lbl setDrawsBackground:NO];
+            [lbl setEditable:NO];
+            [lbl setSelectable:NO];
+            [lbl setAlignment:NSTextAlignmentCenter];
+            [lbl setTextColor:[Utils textColor]];
+            [self addSubview:lbl];
+        }
+        [_timeLabel setFont:[NSFont systemFontOfSize:11]];
+        [_dateLabel setFont:[NSFont systemFontOfSize:10]];
+
+        [self refresh];
+        _timer = [[NSTimer scheduledTimerWithTimeInterval:1.0
+                                                   target:self
+                                                 selector:@selector(refresh)
+                                                 userInfo:nil
+                                                  repeats:YES] retain];
+    }
+    return self;
+}
+
+-(void)dealloc
+{
+    [_timer invalidate];
+    [_timer release];
+    [_timeFmt release];
+    [_dateFmt release];
+    [_lastTime release];
+    [_lastDate release];
+    [_timeLabel release];
+    [_dateLabel release];
+    [menuBuilder release];
+    [super dealloc];
+}
+
+-(NSMenu*)menuForEvent:(NSEvent*)event
+{
+    return menuBuilder ? menuBuilder() : nil;
+}
+
+-(void)refresh
+{
+    NSDate *now = [NSDate date];
+    NSString *t = [_timeFmt stringFromDate:now];
+    NSString *d = [_dateFmt stringFromDate:now];
+    if(![t isEqualToString:_lastTime])
+    {
+        [_lastTime release];
+        _lastTime = [t retain];
+        [_timeLabel setStringValue:t];
+    }
+    if(![d isEqualToString:_lastDate])
+    {
+        [_lastDate release];
+        _lastDate = [d retain];
+        [_dateLabel setStringValue:d];
+    }
+}
+@end
+
+// Battery icon + percentage. Subscribes to IOPowerSources change notifications
+// so it repaints exactly when state changes (capacity, plug/unplug, charging).
+// Returns nil from +new if the machine has no battery (desktop Macs).
+@interface BatteryView : NSView
+{
+@public
+    NSMenu *(^menuBuilder)(void);
+@private
+    NSImageView *_iconView;
+    NSTextField *_percentLabel;
+    CFRunLoopSourceRef _powerSource;
+    int _lastPct;
+    BOOL _lastCharging;
+}
++ (BOOL)hasBattery;
+@end
+
+static void BatteryPowerSourceChanged(void *context);
+
+@implementation BatteryView
+
++ (BOOL)hasBattery
+{
+    CFTypeRef info = IOPSCopyPowerSourcesInfo();
+    if(!info) return NO;
+    CFArrayRef list = IOPSCopyPowerSourcesList(info);
+    BOOL found = NO;
+    if(list)
+    {
+        for(CFIndex i = 0; i < CFArrayGetCount(list); i++)
+        {
+            CFDictionaryRef ps = IOPSGetPowerSourceDescription(info, CFArrayGetValueAtIndex(list, i));
+            CFStringRef type = ps ? (CFStringRef)CFDictionaryGetValue(ps, CFSTR(kIOPSTypeKey)) : NULL;
+            if(type && CFStringCompare(type, CFSTR(kIOPSInternalBatteryType), 0) == kCFCompareEqualTo)
+            {
+                found = YES;
+                break;
+            }
+        }
+        CFRelease(list);
+    }
+    CFRelease(info);
+    return found;
+}
+
+-(id)initWithFrame:(NSRect)frame
+{
+    self = [super initWithFrame:frame];
+    if(self)
+    {
+        _lastPct = -1;
+        _lastCharging = NO;
+
+        // Stacked: icon on top, percent below.
+        CGFloat w = frame.size.width;
+        CGFloat h = frame.size.height;
+
+        CGFloat iconW = 22;
+        _iconView = [[NSImageView alloc] initWithFrame:NSMakeRect((w - iconW) / 2, h * 0.5 + 1, iconW, 12)];
+        [_iconView setImageScaling:NSImageScaleProportionallyUpOrDown];
+        [_iconView setContentTintColor:[Utils textColor]];
+        [self addSubview:_iconView];
+
+        _percentLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 1, w, 12)];
+        [_percentLabel setBezeled:NO];
+        [_percentLabel setDrawsBackground:NO];
+        [_percentLabel setEditable:NO];
+        [_percentLabel setSelectable:NO];
+        [_percentLabel setAlignment:NSTextAlignmentCenter];
+        [_percentLabel setTextColor:[Utils textColor]];
+        [_percentLabel setFont:[NSFont systemFontOfSize:10]];
+        [self addSubview:_percentLabel];
+
+        [self refresh];
+
+        _powerSource = IOPSNotificationCreateRunLoopSource(BatteryPowerSourceChanged, (void*)self);
+        if(_powerSource)
+            CFRunLoopAddSource(CFRunLoopGetMain(), _powerSource, kCFRunLoopCommonModes);
+    }
+    return self;
+}
+
+-(void)dealloc
+{
+    if(_powerSource)
+    {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), _powerSource, kCFRunLoopCommonModes);
+        CFRelease(_powerSource);
+    }
+    [_iconView release];
+    [_percentLabel release];
+    [menuBuilder release];
+    [super dealloc];
+}
+
+-(NSMenu*)menuForEvent:(NSEvent*)event
+{
+    return menuBuilder ? menuBuilder() : nil;
+}
+
+-(void)refresh
+{
+    int pct = -1;
+    BOOL charging = NO;
+    BOOL onAC = NO;
+
+    CFTypeRef info = IOPSCopyPowerSourcesInfo();
+    if(info)
+    {
+        CFArrayRef list = IOPSCopyPowerSourcesList(info);
+        if(list)
+        {
+            for(CFIndex i = 0; i < CFArrayGetCount(list); i++)
+            {
+                CFDictionaryRef ps = IOPSGetPowerSourceDescription(info, CFArrayGetValueAtIndex(list, i));
+                if(!ps) continue;
+                CFStringRef type = (CFStringRef)CFDictionaryGetValue(ps, CFSTR(kIOPSTypeKey));
+                if(!type || CFStringCompare(type, CFSTR(kIOPSInternalBatteryType), 0) != kCFCompareEqualTo) continue;
+
+                CFNumberRef cap = (CFNumberRef)CFDictionaryGetValue(ps, CFSTR(kIOPSCurrentCapacityKey));
+                if(cap) CFNumberGetValue(cap, kCFNumberIntType, &pct);
+
+                CFBooleanRef ch = (CFBooleanRef)CFDictionaryGetValue(ps, CFSTR(kIOPSIsChargingKey));
+                if(ch) charging = CFBooleanGetValue(ch);
+
+                CFStringRef state = (CFStringRef)CFDictionaryGetValue(ps, CFSTR(kIOPSPowerSourceStateKey));
+                if(state && CFStringCompare(state, CFSTR(kIOPSACPowerValue), 0) == kCFCompareEqualTo)
+                    onAC = YES;
+                break;
+            }
+            CFRelease(list);
+        }
+        CFRelease(info);
+    }
+
+    if(pct < 0) return;
+
+    if(pct == _lastPct && charging == _lastCharging) return;
+    _lastPct = pct;
+    _lastCharging = charging;
+
+    [_percentLabel setStringValue:[NSString stringWithFormat:@"%d%%", pct]];
+
+    // Pick the closest SF Symbol bucket. Charging gets the .bolt variant
+    // when available; full-while-plugged-in keeps the bolt too.
+    NSString *base;
+    if(pct >= 88)      base = @"battery.100";
+    else if(pct >= 63) base = @"battery.75";
+    else if(pct >= 38) base = @"battery.50";
+    else if(pct >= 13) base = @"battery.25";
+    else               base = @"battery.0";
+
+    NSString *name = (charging || (onAC && pct >= 99)) ? [base stringByAppendingString:@".bolt"] : base;
+    NSImage *img = [NSImage imageWithSystemSymbolName:name accessibilityDescription:@"Battery"];
+    if(!img) img = [NSImage imageWithSystemSymbolName:base accessibilityDescription:@"Battery"];
+    if(img)
+    {
+        NSImageSymbolConfiguration *cfg = [NSImageSymbolConfiguration configurationWithPointSize:13 weight:NSFontWeightRegular];
+        img = [img imageWithSymbolConfiguration:cfg];
+        [_iconView setImage:img];
+    }
+}
+@end
+
+static void BatteryPowerSourceChanged(void *context)
+{
+    BatteryView *view = (__bridge BatteryView*)context;
+    [view refresh];
+}
 
 static CGEventRef TaskBarKeyEventTapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *userInfo)
 {
@@ -200,7 +479,9 @@ public:
             [NSMenu popUpContextMenu:menu withEvent:event forView:trashBtn];
         };
         [[self contentView] addSubview:_trashButton];
-        
+
+        [self rebuildRightWidgets];
+
         NSEventMask eventMask = NSLeftMouseDownMask | NSLeftMouseUpMask;
         
         _mouseEventMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:eventMask handler:^(NSEvent *event)
@@ -256,6 +537,8 @@ public:
     [_quickLaunch release];
     [_trashButton release];
     [_showDesktopButton release];
+    [_clockView release];
+    [_batteryView release];
     [super dealloc];
 }
 
@@ -317,6 +600,79 @@ public:
     {
         _cmdTapClean = NO;
     }
+}
+
+-(void)rebuildRightWidgets
+{
+    [_clockView removeFromSuperview];
+    [_clockView release];
+    _clockView = nil;
+
+    [_batteryView removeFromSuperview];
+    [_batteryView release];
+    _batteryView = nil;
+
+    CGFloat barWidth = [self frame].size.width;
+    CGFloat cursor = barWidth - SHOW_DESK_BTN_WIDTH - TRASH_BTN_WIDTH;
+
+    TaskBarWindow *tb = self;
+    NSMenu *(^builder)(void) = ^NSMenu*(void) { return [tb buildWidgetsMenu]; };
+
+    if(![Utils isClockHidden])
+    {
+        cursor -= CLOCK_TRASH_SPACING + CLOCK_WIDTH;
+        ClockView *cv = [[ClockView alloc] initWithFrame:NSMakeRect(cursor, 0, CLOCK_WIDTH, TB_HEIGHT)];
+        cv->menuBuilder = [builder copy];
+        [cv setAutoresizingMask:NSViewMinXMargin];
+        [[self contentView] addSubview:cv];
+        _clockView = cv;
+    }
+
+    if(![Utils isBatteryHidden] && [BatteryView hasBattery])
+    {
+        cursor -= BATTERY_CLOCK_SPACING + BATTERY_WIDTH;
+        BatteryView *bv = [[BatteryView alloc] initWithFrame:NSMakeRect(cursor, 0, BATTERY_WIDTH, TB_HEIGHT)];
+        bv->menuBuilder = [builder copy];
+        [bv setAutoresizingMask:NSViewMinXMargin];
+        [[self contentView] addSubview:bv];
+        _batteryView = bv;
+    }
+
+    // Windows need to reflow to fit the new right-reserve width.
+    [self startAnimation];
+}
+
+-(NSMenu*)buildWidgetsMenu
+{
+    NSMenu *menu = [[[NSMenu alloc] initWithTitle:@"WidgetsMenu"] autorelease];
+    TaskBarWindow *tb = self;
+
+    auto toggleClock = [=]() {
+        [Utils setClockHidden:![Utils isClockHidden]];
+        [tb rebuildRightWidgets];
+    };
+    NSMenuItem *clockItem = [ActionItem itemWithTitle:@"Show Clock" action:toggleClock];
+    [clockItem setState:[Utils isClockHidden] ? NSControlStateValueOff : NSControlStateValueOn];
+    [menu addItem:clockItem];
+
+    if([BatteryView hasBattery])
+    {
+        auto toggleBattery = [=]() {
+            [Utils setBatteryHidden:![Utils isBatteryHidden]];
+            [tb rebuildRightWidgets];
+        };
+        NSMenuItem *batteryItem = [ActionItem itemWithTitle:@"Show Battery" action:toggleBattery];
+        [batteryItem setState:[Utils isBatteryHidden] ? NSControlStateValueOff : NSControlStateValueOn];
+        [menu addItem:batteryItem];
+    }
+
+    [menu addItem:[ForceMenuPos forcePosItem:[NSEvent mouseLocation] level:NSDockWindowLevel + 1]];
+    return menu;
+}
+
+-(void)rightMouseDown:(NSEvent*)event
+{
+    [NSMenu popUpContextMenu:[self buildWidgetsMenu] withEvent:event forView:[self contentView]];
 }
 
 -(void)showDesktop
@@ -391,7 +747,8 @@ public:
     int windowsBaseX = BUTTON_SPACING + START_BTN_WIDTH + START_BTN_RIGHT_SPACING + qlSpace;
 
     float usedWidth = (float)windowsBaseX + (float)(max(n - 1, 0)) * BUTTON_SPACING;
-    int rightReserve = TRASH_BTN_WIDTH + SHOW_DESK_BTN_WIDTH + WINDOWS_RIGHT_SPACING;
+    int batteryReserve = _batteryView ? (BATTERY_WIDTH + BATTERY_CLOCK_SPACING) : 0;
+    int rightReserve = TRASH_BTN_WIDTH + SHOW_DESK_BTN_WIDTH + CLOCK_WIDTH + CLOCK_TRASH_SPACING + batteryReserve + WINDOWS_RIGHT_SPACING;
     float availableWidth = [self frame].size.width - usedWidth - rightReserve;
     int maxButtonSize = n > 0 ? (int)(availableWidth / (float)n) : BUTTON_SIZE;
     int perButton = std::min((int)BUTTON_SIZE, maxButtonSize);
@@ -495,7 +852,8 @@ public:
     float usedWidth = windowsBaseX;
     usedWidth += (float)(max((int)_windows.size() - 1, 0)) * BUTTON_SPACING;
 
-    int rightReserve = TRASH_BTN_WIDTH + SHOW_DESK_BTN_WIDTH + WINDOWS_RIGHT_SPACING;
+    int batteryReserve = _batteryView ? (BATTERY_WIDTH + BATTERY_CLOCK_SPACING) : 0;
+    int rightReserve = TRASH_BTN_WIDTH + SHOW_DESK_BTN_WIDTH + CLOCK_WIDTH + CLOCK_TRASH_SPACING + batteryReserve + WINDOWS_RIGHT_SPACING;
     float availableWidth = [self frame].size.width - usedWidth - rightReserve;
     int maxButtonSize = (int)(availableWidth / (float)_windows.size());
 

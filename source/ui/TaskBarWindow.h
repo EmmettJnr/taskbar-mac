@@ -29,6 +29,8 @@ class WindowInfo;
     QuickLaunch *_quickLaunch;
     HoverButton *_trashButton;
     NSView *_showDesktopButton;
+    NSView *_clockView;
+    NSView *_batteryView;
     NSRect rect;
     CVDisplayLinkRef displayLink;
     double lastRender;
